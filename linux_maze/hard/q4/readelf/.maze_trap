@@ -1,0 +1,18 @@
+#!/bin/bash
+TEAM_NAME=${MAZE_TEAM}
+PLAYER_NUM=${MAZE_PLAYER}
+SERVER_URL=${MAZE_SERVER}
+
+if [ -z "$TEAM_NAME" ]; then
+    echo "Error: MAZE_TEAM not set. Run maze_init first!"
+    exit 1
+fi
+
+ANSWER=$(basename "$PWD")
+
+# Submit wrong answer
+response=$(curl -s -X POST "${SERVER_URL}/api/session/${TEAM_NAME}/answer" \
+    -H "Content-Type: application/json" \
+    -d "{\"answer\": \"$ANSWER\", \"player\": $PLAYER_NUM}")
+
+echo "$response"

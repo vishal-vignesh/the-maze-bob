@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# This hook is triggered when cd is used
+# It checks if we're entering an answer directory
+
+if [ -f ".maze_check" ]; then
+    # Correct answer
+    ./.maze_check
+elif [ -f ".maze_trap" ]; then
+    # Wrong answer - trigger trap
+    ./.maze_trap
+fi
