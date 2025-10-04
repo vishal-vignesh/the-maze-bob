@@ -93,6 +93,7 @@ class GameSession:
         self.hard_path_locked = False
         self.events = []
         self.path_start_time = None
+        self.state_version = 0  # For tracking state changes
         
     def to_dict(self):
         return {
@@ -108,7 +109,8 @@ class GameSession:
             'wrong_answers': self.wrong_answers,
             'hard_path_locked': self.hard_path_locked,
             'total_time': self.get_total_time(),
-            'events': self.events
+            'events': self.events,
+            'state_version': self.state_version
         }
     
     def get_total_time(self):
@@ -132,9 +134,6 @@ def index():
     <div class="stats"><div class="stat-box"><h3>Active Sessions</h3><p id="active-count">0</p></div>
     <div class="stat-box"><h3>Completed</h3><p id="completed-count">0</p></div>
     <div class="stat-box"><h3>Total Penalties</h3><p id="total-penalties">0s</p></div></div>
-    <h2>Create Session</h2><div style="margin:20px 0">
-    <input id="team-name" placeholder="Team Name"/><input id="player1" placeholder="Player 1"/>
-    <input id="player2" placeholder="Player 2"/><button onclick="createSession()">Create</button></div>
     <h2>Active Sessions</h2><div id="sessions"></div></div>
     <script>async function loadSessions(){const res=await fetch('/api/sessions');const data=await res.json();
     document.getElementById('active-count').textContent=data.sessions.filter(s=>!s.end_time).length;
@@ -145,34 +144,101 @@ def index():
     <p>📍 ${s.current_path||'Not started'} | Q${s.current_question+1} | Player ${s.current_player}</p>
     <p>⏱️ ${s.total_time.toFixed(1)}s | <span class="penalty">Penalties: ${s.total_penalties}s</span></p>
     ${s.end_time?'<p class="success">✅ COMPLETED</p>':'<p>🏃 IN PROGRESS</p>'}</div>`).join('')}
-    async function createSession(){const team=document.getElementById('team-name').value;
-    const p1=document.getElementById('player1').value;const p2=document.getElementById('player2').value;
-    await fetch('/api/session/create',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({team_name:team,player1:p1,player2:p2})});
-    document.getElementById('team-name').value='';document.getElementById('player1').value='';
-    document.getElementById('player2').value='';loadSessions()}setInterval(loadSessions,2000);loadSessions()</script>
+    setInterval(loadSessions,2000);loadSessions()</script>
     </body></html>''')
 
 @app.route('/api/session/create', methods=['POST'])
 def create_session():
+    """ENHANCED: Auto-creates session from client init"""
     data = request.json
     team_name = data.get('team_name')
     player1 = data.get('player1')
     player2 = data.get('player2')
+    
     if not all([team_name, player1, player2]):
         return jsonify({'error': 'Missing required fields'}), 400
+    
+    # Check if session already exists
+    if team_name in game_sessions:
+        session = game_sessions[team_name]
+        return jsonify({
+            'success': True, 
+            'team_name': team_name, 
+            'message': 'Session already exists',
+            'already_exists': True,
+            'player1': session.player1,
+            'player2': session.player2,
+            'started': session.start_time is not None
+        })
+    
     session = GameSession(team_name, player1, player2)
     game_sessions[team_name] = session
-    return jsonify({'success': True, 'team_name': team_name, 'message': 'Session created'})
+    
+    return jsonify({
+        'success': True, 
+        'team_name': team_name, 
+        'message': 'Session created successfully',
+        'already_exists': False
+    })
 
 @app.route('/api/session/<team_name>/start', methods=['POST'])
 def start_game(team_name):
     session = game_sessions.get(team_name)
     if not session:
         return jsonify({'error': 'Session not found'}), 404
+    
+    if session.start_time:
+        return jsonify({
+            'success': True, 
+            'message': 'Game already started',
+            'start_time': session.start_time.isoformat()
+        })
+    
     session.start_time = datetime.now()
+    session.state_version += 1
     session.events.append({'type': 'game_start', 'timestamp': session.start_time.isoformat()})
     return jsonify({'success': True, 'start_time': session.start_time.isoformat()})
+
+@app.route('/api/session/<team_name>/poll', methods=['GET'])
+def poll_updates(team_name):
+    """NEW: Efficient polling endpoint for real-time updates"""
+    session = game_sessions.get(team_name)
+    if not session:
+        return jsonify({'error': 'Session not found'}), 404
+    
+    last_version = request.args.get('version', 0, type=int)
+    player_num = request.args.get('player', 1, type=int)
+    
+    # Return current state with change indicator
+    current_state = {
+        'state_version': session.state_version,
+        'has_changes': session.state_version > last_version,
+        'current_player': session.current_player,
+        'is_your_turn': session.current_player == player_num,
+        'current_path': session.current_path,
+        'current_question': session.current_question,
+        'game_started': session.start_time is not None,
+        'game_complete': session.end_time is not None,
+        'total_penalties': session.total_penalties,
+        'hard_path_locked': session.hard_path_locked
+    }
+    
+    # Include current question if in progress
+    if session.current_path and not session.end_time:
+        if session.current_question < len(QUESTIONS[session.current_path]):
+            question = QUESTIONS[session.current_path][session.current_question]
+            current_state['question'] = {
+                'id': question['id'],
+                'text': question['question'],
+                'options': list(question['options'].keys()),
+                'number': session.current_question + 1,
+                'total': len(QUESTIONS[session.current_path])
+            }
+    
+    if session.end_time:
+        current_state['total_time'] = session.get_total_time()
+    
+    return jsonify(current_state)
 
 @app.route('/api/session/<team_name>/current_question', methods=['GET'])
 def get_current_question(team_name):
@@ -211,6 +277,7 @@ def select_path(team_name):
     session.current_path = path
     session.current_question = 0
     session.path_start_time = datetime.now()
+    session.state_version += 1
     session.events.append({'type': 'path_selected', 'path': path, 'timestamp': datetime.now().isoformat()})
     question = QUESTIONS[path][0]
     return jsonify({'success': True, 'path': path, 'question': question, 'current_player': session.current_player})
@@ -231,6 +298,7 @@ def submit_answer(team_name):
     question = QUESTIONS[path][question_idx]
     is_correct = question['options'].get(answer, False)
     timestamp = datetime.now()
+    session.state_version += 1
     session.events.append({'type': 'answer_submitted', 'player': player, 'question_id': question['id'],
                           'answer': answer, 'correct': is_correct, 'timestamp': timestamp.isoformat()})
     if is_correct:
@@ -287,6 +355,7 @@ def end_game(team_name):
     if not session:
         return jsonify({'error': 'Session not found'}), 404
     session.end_time = datetime.now()
+    session.state_version += 1
     return jsonify({'success': True, 'total_time': session.get_total_time()})
 
 @app.route('/api/leaderboard', methods=['GET'])
