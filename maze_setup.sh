@@ -3,11 +3,15 @@
 # maze_setup.sh - Creates the physical maze directory structure
 # This script creates the actual directories and trap scripts
 
-MAZE_ROOT="/mnt/c/projects/the-maze-bob/linux_maze"
-SERVER_URL="http://192.168.29.210:5000"
+# CHANGE THESE TO YOUR CONFIGURATION
+MAZE_ROOT="$HOME/linux_maze"
+SERVER_URL="http://localhost:5000"
 
 echo "🎮 Setting up Linux Maze Game..."
 echo "================================"
+echo "Maze location: $MAZE_ROOT"
+echo "Server URL: $SERVER_URL"
+echo ""
 
 # Clean previous setup
 if [ -d "$MAZE_ROOT" ]; then
@@ -31,56 +35,12 @@ create_question() {
     
     # Create correct answer directory
     mkdir -p "$question_dir/$correct_answer"
+    echo "" > "$question_dir/$correct_answer/.maze_check"
     
-    # Create a success script in the correct directory
-    cat > "$question_dir/$correct_answer/.maze_check" << 'EOF'
-#!/bin/bash
-TEAM_NAME=${MAZE_TEAM}
-PLAYER_NUM=${MAZE_PLAYER}
-SERVER_URL=${MAZE_SERVER}
-
-if [ -z "$TEAM_NAME" ]; then
-    echo "Error: MAZE_TEAM not set. Run maze_init first!"
-    exit 1
-fi
-
-# Extract the answer from the current directory
-ANSWER=$(basename "$PWD")
-
-# Submit the answer
-response=$(curl -s -X POST "${SERVER_URL}/api/session/${TEAM_NAME}/answer" \
-    -H "Content-Type: application/json" \
-    -d "{\"answer\": \"$ANSWER\", \"player\": $PLAYER_NUM}")
-
-echo "$response"
-EOF
-    chmod +x "$question_dir/$correct_answer/.maze_check"
-    
-    # Create wrong answer directories with trap scripts
+    # Create wrong answer directories
     for wrong_ans in "${wrong_answers[@]}"; do
         mkdir -p "$question_dir/$wrong_ans"
-        
-        cat > "$question_dir/$wrong_ans/.maze_trap" << 'EOF'
-#!/bin/bash
-TEAM_NAME=${MAZE_TEAM}
-PLAYER_NUM=${MAZE_PLAYER}
-SERVER_URL=${MAZE_SERVER}
-
-if [ -z "$TEAM_NAME" ]; then
-    echo "Error: MAZE_TEAM not set. Run maze_init first!"
-    exit 1
-fi
-
-ANSWER=$(basename "$PWD")
-
-# Submit wrong answer
-response=$(curl -s -X POST "${SERVER_URL}/api/session/${TEAM_NAME}/answer" \
-    -H "Content-Type: application/json" \
-    -d "{\"answer\": \"$ANSWER\", \"player\": $PLAYER_NUM}")
-
-echo "$response"
-EOF
-        chmod +x "$question_dir/$wrong_ans/.maze_trap"
+        echo "" > "$question_dir/$wrong_ans/.maze_trap"
     done
 }
 
@@ -126,27 +86,6 @@ create_question "hard" 3 "perf" "dtrace" "ftrace" "bpftrace"
 create_question "hard" 4 "ldd" "objdump" "readelf" "nm"
 
 # ============================================
-# Create hook scripts for cd command
-# ============================================
-echo "Creating maze hooks..."
-
-cat > "$MAZE_ROOT/.maze_cd_hook" << 'EOF'
-#!/bin/bash
-
-# This hook is triggered when cd is used
-# It checks if we're entering an answer directory
-
-if [ -f ".maze_check" ]; then
-    # Correct answer
-    ./.maze_check
-elif [ -f ".maze_trap" ]; then
-    # Wrong answer - trigger trap
-    ./.maze_trap
-fi
-EOF
-chmod +x "$MAZE_ROOT/.maze_cd_hook"
-
-# ============================================
 # Create README files
 # ============================================
 
@@ -170,11 +109,12 @@ PATHS:
 
 SETUP:
 ------
-1. Source the client script: source maze_game_client.sh
+1. Source the client script: source maze_client.sh
 2. Initialize: maze_init
-3. Start game: maze_start
-4. Choose path: cd easy (or medium/hard)
-5. Answer questions: cd <answer>
+3. Create session: maze_create (Player 1)
+4. Start game: maze_start (Player 1)
+5. Choose path: cd easy (or medium/hard)
+6. Answer questions: cd <answer>
 
 Good luck! 🍀
 EOF
@@ -231,34 +171,6 @@ EOF
 chmod +x "$MAZE_ROOT/monitor.sh"
 
 # ============================================
-# Create team directory generator
-# ============================================
-
-cat > "$MAZE_ROOT/create_team_space.sh" << 'EOF'
-#!/bin/bash
-
-if [ -z "$1" ]; then
-    echo "Usage: ./create_team_space.sh <team_name>"
-    exit 1
-fi
-
-TEAM_NAME=$1
-TEAM_DIR="/tmp/maze_teams/$TEAM_NAME"
-
-mkdir -p "$TEAM_DIR"
-cd "$TEAM_DIR"
-
-# Create symbolic links to the maze
-ln -s /tmp/linux_maze/easy easy
-ln -s /tmp/linux_maze/medium medium
-ln -s /tmp/linux_maze/hard hard
-
-echo "✅ Team space created at: $TEAM_DIR"
-echo "📁 cd $TEAM_DIR to enter your team space"
-EOF
-chmod +x "$MAZE_ROOT/create_team_space.sh"
-
-# ============================================
 # Summary
 # ============================================
 
@@ -268,11 +180,10 @@ echo "================================"
 echo "Maze location: $MAZE_ROOT"
 echo ""
 echo "NEXT STEPS:"
-echo "1. Start Flask server: python maze_server.py"
-echo "2. Source client: source maze_game_client.sh"
-echo "3. Create team space: $MAZE_ROOT/create_team_space.sh <team_name>"
-echo "4. Begin: cd to team space, run maze_init"
+echo "1. Start Flask server: python3 server.py"
+echo "2. Source client: source maze_client.sh"
+echo "3. Begin: maze_init"
 echo ""
-echo "Admin Dashboard: http://localhost:5000"
+echo "Admin Dashboard: $SERVER_URL"
 echo "Monitor Teams: $MAZE_ROOT/monitor.sh"
 echo ""

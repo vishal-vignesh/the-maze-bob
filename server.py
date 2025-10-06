@@ -1,8 +1,6 @@
 from flask import Flask, request, jsonify, render_template_string
 from datetime import datetime
 import json
-import os
-from pathlib import Path
 
 app = Flask(__name__)
 
@@ -161,6 +159,8 @@ def create_session():
     player2 = data.get('player2')
     if not all([team_name, player1, player2]):
         return jsonify({'error': 'Missing required fields'}), 400
+    if team_name in game_sessions:
+        return jsonify({'error': 'Team name already exists'}), 400
     session = GameSession(team_name, player1, player2)
     game_sessions[team_name] = session
     return jsonify({'success': True, 'team_name': team_name, 'message': 'Session created'})
@@ -176,7 +176,6 @@ def start_game(team_name):
 
 @app.route('/api/session/<team_name>/current_question', methods=['GET'])
 def get_current_question(team_name):
-    """CRITICAL: This endpoint enables player synchronization"""
     session = game_sessions.get(team_name)
     if not session:
         return jsonify({'error': 'Session not found'}), 404
@@ -281,13 +280,18 @@ def get_status(team_name):
 def get_all_sessions():
     return jsonify({'sessions': [session.to_dict() for session in game_sessions.values()]})
 
-@app.route('/api/session/<team_name>/end', methods=['POST'])
-def end_game(team_name):
-    session = game_sessions.get(team_name)
-    if not session:
-        return jsonify({'error': 'Session not found'}), 404
-    session.end_time = datetime.now()
-    return jsonify({'success': True, 'total_time': session.get_total_time()})
+@app.route('/api/sessions/clear', methods=['POST'])
+def clear_sessions():
+    global game_sessions
+    game_sessions = {}
+    return jsonify({'success': True, 'message': 'All sessions cleared'})
+
+@app.route('/api/session/<team_name>/delete', methods=['DELETE'])
+def delete_session(team_name):
+    if team_name in game_sessions:
+        del game_sessions[team_name]
+        return jsonify({'success': True, 'message': f'Session {team_name} deleted'})
+    return jsonify({'error': 'Session not found'}), 404
 
 @app.route('/api/leaderboard', methods=['GET'])
 def get_leaderboard():
