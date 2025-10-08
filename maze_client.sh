@@ -4,7 +4,7 @@
 # Usage: source maze_game_client.sh
 
 # Configuration
-SERVER_URL="http://192.168.29.210:5000"
+SERVER_URL="https://the-maze-bob.onrender.com"
 TEAM_NAME=""
 PLAYER_NUM=""
 CURRENT_PATH=""
@@ -126,7 +126,11 @@ start_auto_sync() {
     echo -e "${CYAN}🔄 Auto-sync enabled (updates every 2s)${NC}"
 }
 
-# Initialize game - NOW WITH AUTO SERVER REGISTRATION
+#!/bin/bash
+
+# Fixed maze_init function
+# Replace the maze_init function in your maze_game_client.sh with this
+
 maze_init() {
     echo -e "${GREEN}╔════════════════════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║        🎮 Welcome to the Linux Maze Game! 🎮           ║${NC}"
@@ -154,11 +158,28 @@ maze_init() {
     # Create session on server
     echo -e "${YELLOW}📡 Registering with server...${NC}"
     
-    response=$(curl -s -X POST "${SERVER_URL}/api/session/create" \
+    # Use -s for silent mode and -S to still show errors
+    response=$(curl -sS -X POST "${SERVER_URL}/api/session/create" \
         -H "Content-Type: application/json" \
-        -d "{\"team_name\": \"${TEAM_NAME}\", \"player1\": \"${PLAYER1_NAME}\", \"player2\": \"${PLAYER2_NAME}\"}")
+        -d "{\"team_name\": \"${TEAM_NAME}\", \"player1\": \"${PLAYER1_NAME}\", \"player2\": \"${PLAYER2_NAME}\"}" 2>&1)
     
-    if echo "$response" | grep -q '"success": true'; then
+    # Check if response is empty
+    if [ -z "$response" ]; then
+        echo -e "${RED}❌ No response from server. Check your connection.${NC}"
+        return 1
+    fi
+    
+    # Check if response contains valid JSON by trying to parse it
+    if ! echo "$response" | python3 -c "import sys, json; json.load(sys.stdin)" > /dev/null 2>&1; then
+        echo -e "${RED}❌ Server returned invalid response:${NC}"
+        echo "$response"
+        return 1
+    fi
+    
+    # Check for success field
+    success=$(echo "$response" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('success', False))" 2>/dev/null)
+    
+    if [ "$success" = "True" ]; then
         already_exists=$(echo "$response" | python3 -c "import sys, json; print(json.load(sys.stdin).get('already_exists', False))" 2>/dev/null)
         
         export MAZE_TEAM="$TEAM_NAME"
@@ -191,6 +212,7 @@ maze_init() {
         
         echo -e "${YELLOW}💡 Auto-sync is enabled - you'll be notified when it's your turn${NC}"
     else
+        # Get error message
         error=$(echo "$response" | python3 -c "import sys, json; print(json.load(sys.stdin).get('error', 'Unknown error'))" 2>/dev/null)
         echo -e "${RED}❌ Registration failed: $error${NC}"
         return 1

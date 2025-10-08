@@ -4,7 +4,7 @@
     # This script creates the actual directories and trap scripts
 
     MAZE_ROOT="/mnt/c/projects/the-maze-bob/linux_maze"
-    SERVER_URL="http://192.168.29.210:5000"
+    SERVER_URL="https://the-maze-bob.onrender.com"
 
     echo "🎮 Setting up Linux Maze Game..."
     echo "================================"
